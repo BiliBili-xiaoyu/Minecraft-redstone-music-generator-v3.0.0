@@ -123,6 +123,7 @@ class RedstoneMapper:
         minecraft_notes = []
         
         if not notes:
+            print("[增强映射] 警告: 输入音符列表为空")
             return minecraft_notes
         
         # 分析音频特征
@@ -397,12 +398,80 @@ class RedstoneMapper:
     # 保持原有方法兼容性
     def map_to_minecraft(self, notes, auto_tune=True, audio_duration=None):
         """保持原有接口兼容"""
-        return self.map_to_minecraft_enhanced(notes, {
+        result = self.map_to_minecraft_enhanced(notes, {
             'auto_tune': auto_tune,
             'harmony_enabled': False,
             'instrument_strategy': 'frequency'
         })
+        return result if result is not None else []
     
     def optimize_circuit(self, minecraft_notes, max_ticks=1000):
         """电路优化（原有方法）"""
-        # 保持不变...
+        # 安全检查：确保输入不为None
+        if minecraft_notes is None:
+            print("[电路优化] 警告: 输入音符列表为None，返回空列表")
+            return []
+        
+        # 安全检查：确保是列表
+        if not isinstance(minecraft_notes, list):
+            print(f"[电路优化] 警告: 输入类型不是列表，而是{type(minecraft_notes)}，返回空列表")
+            return []
+        
+        # 如果没有音符，直接返回
+        if len(minecraft_notes) == 0:
+            return minecraft_notes
+        
+        print(f"[电路优化] 开始优化 {len(minecraft_notes)} 个音符")
+        
+        try:
+            # 简单的优化逻辑：合并时间上非常接近的音符
+            optimized_notes = []
+            last_note = None
+            
+            for note in sorted(minecraft_notes, key=lambda x: x.get('time_ticks', 0)):
+                # 确保note是字典且有time_ticks
+                if not isinstance(note, dict) or 'time_ticks' not in note:
+                    print(f"[电路优化] 警告: 跳过无效音符: {note}")
+                    continue
+                
+                current_tick = note['time_ticks']
+                
+                if last_note is None:
+                    optimized_notes.append(note)
+                    last_note = note
+                else:
+                    last_tick = last_note['time_ticks']
+                    
+                    # 如果两个音符的时间太近（小于2刻），合并它们
+                    if current_tick - last_tick < 2:
+                        # 选择音量较大的音符
+                        current_power = note.get('power', 1)
+                        last_power = last_note.get('power', 1)
+                        
+                        if current_power > last_power:
+                            # 用当前音符替换上一个音符
+                            optimized_notes[-1] = note
+                            last_note = note
+                        # 否则保持上一个音符
+                    else:
+                        optimized_notes.append(note)
+                        last_note = note
+            
+            # 限制最大刻数
+            if max_ticks > 0:
+                optimized_notes = [note for note in optimized_notes if note['time_ticks'] <= max_ticks]
+            
+            original_count = len(minecraft_notes)
+            optimized_count = len(optimized_notes)
+            
+            if optimized_count < original_count:
+                print(f"[电路优化] {original_count} -> {optimized_count} 个音符 (减少 {original_count - optimized_count})")
+            else:
+                print(f"[电路优化] 未减少音符数量，保持 {optimized_count} 个音符")
+            
+            return optimized_notes
+            
+        except Exception as e:
+            print(f"[电路优化] 优化过程中出错: {e}")
+            # 出错时返回原始列表
+            return minecraft_notes

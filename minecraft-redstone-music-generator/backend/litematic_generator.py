@@ -97,50 +97,63 @@ class LitematicGenerator:
         print(f"[投影生成] 格式: {format_type}, 配置: {config}")
         
         # 计算尺寸
-        max_time = max([note['time_ticks'] for note in redstone_notes]) if redstone_notes else 0
+        if redstone_notes:
+            max_time = max([note.get('time_ticks', 0) for note in redstone_notes])
+        else:
+            max_time = 0
+            
         width = min(max(max_time // 5 + 5, 10), 128)
         height = min(config.get('height', 6), 64)
-        length = min(max(len(redstone_notes) // 5 + 5, 8), 128)
+        length = min(max(len(redstone_notes) // 5 + 5, 8), 128) if redstone_notes else 10
         
-        name = config.get('name', f"RedstoneMusic_{os.path.basename(output_path).split('.')[0]}")
+        name = config.get('name', f"RedstoneMusic_{os.path.basename(output_path).split('.')[0] if '.' in output_path else 'unknown'}")
         
         # 根据格式调用相应方法
         if format_type == 'schematic':
             file_path = output_path if output_path.endswith('.schematic') else output_path + '.schematic'
-            success = self.generate_schematic(redstone_notes, file_path, config)
+            stats = self._generate_schematic(redstone_notes, file_path, config)
         elif format_type == 'litematic':
             file_path = output_path if output_path.endswith('.litematic') else output_path + '.litematic'
-            success = self.generate_litematic(redstone_notes, file_path, config)
+            stats = self._generate_litematic(redstone_notes, file_path, config)
         elif format_type == 'structure':
             file_path = output_path if output_path.endswith('.nbt') else output_path + '.nbt'
-            success = self.generate_structure_nbt(redstone_notes, file_path, config)
+            stats = self._generate_structure_nbt(redstone_notes, file_path, config)
         elif format_type == 'blueprint':
             file_path = output_path if output_path.endswith('.json') else output_path + '.json'
-            success = self.generate_blueprint(redstone_notes, file_path, config)
+            stats = self._generate_blueprint(redstone_notes, file_path, config)
         else:
             print(f"[错误] 不支持的格式: {format_type}")
             return self._create_default_stats(name, width, height, length)
         
-        if not success:
-            print(f"[警告] {format_type} 生成可能有问题")
-        
         # 计算文件大小
-        file_size = os.path.getsize(file_path) // 1024 if os.path.exists(file_path) else 0
+        file_size = 0
+        if os.path.exists(file_path):
+            file_size = os.path.getsize(file_path) // 1024
         
-        return {
+        # 确保stats包含必要字段
+        if not isinstance(stats, dict):
+            stats = {}
+        
+        # 合并统计信息
+        result_stats = {
             'name': name,
             'dimensions': {'width': width, 'height': height, 'length': length},
-            'note_blocks': len(redstone_notes),
-            'redstone_dust': len(redstone_notes),
-            'repeaters': max(len(redstone_notes) // 10, 1),
+            'note_blocks': len(redstone_notes) if redstone_notes else 0,
+            'redstone_dust': len(redstone_notes) if redstone_notes else 0,
+            'repeaters': max(len(redstone_notes) // 10, 1) if redstone_notes else 1,
             'redstone_length': max_time,
             'duration': max_time / 10.0,
             'file_size': file_size,
             'format': format_type,
             'file_path': file_path
         }
+        
+        # 如果stats中有额外字段，合并进来
+        result_stats.update(stats)
+        
+        return result_stats
     
-    def generate_schematic(self, redstone_notes, output_path, config=None):
+    def _generate_schematic(self, redstone_notes, output_path, config=None):
         """
         生成Schematic文件 (MCEdit/WorldEdit格式)
         """
@@ -151,26 +164,40 @@ class LitematicGenerator:
             if config is None:
                 config = {}
             
-            version = config.get('schematic_version', 2)
-            include_entities = config.get('include_entities', False)
-            include_tile_entities = config.get('include_tile_entities', True)
+            # 计算尺寸
+            if redstone_notes:
+                max_ticks = max([note.get('time_ticks', 0) for note in redstone_notes])
+            else:
+                max_ticks = 0
+                
+            width = min(max(max_ticks // 5 + 5, 10), 128)
+            height = min(config.get('height', 6), 64)
+            length = min(max(len(redstone_notes) // 5 + 5, 8), 128) if redstone_notes else 10
             
-            # 创建Schematic
-            schematic_data = self._create_schematic_data(redstone_notes, config)
+            print(f"[Schematic] 尺寸: {width}x{height}x{length}")
             
+            # 创建Schematic数据
+            schematic_data = self._create_schematic_data(redstone_notes, width, height, length, config)
+            
+            # 写入文件
             with open(output_path, 'wb') as f:
                 f.write(schematic_data)
             
-            print(f"[Schematic] 完成: {output_path} ({os.path.getsize(output_path)} 字节)")
-            return True
+            file_size = os.path.getsize(output_path)
+            print(f"[Schematic] 完成: {output_path} ({file_size} 字节)")
+            
+            return {
+                'success': True,
+                'dimensions': {'width': width, 'height': height, 'length': length}
+            }
             
         except Exception as e:
             import traceback
             traceback.print_exc()
             print(f"[Schematic错误] 生成失败: {str(e)}")
-            return False
+            return {'success': False, 'error': str(e)}
     
-    def generate_litematic(self, redstone_notes, output_path, config=None):
+    def _generate_litematic(self, redstone_notes, output_path, config=None):
         """
         生成Litematic文件 (Litematica格式)
         """
@@ -180,25 +207,42 @@ class LitematicGenerator:
             if config is None:
                 config = {}
             
+            # 计算尺寸
+            if redstone_notes:
+                max_ticks = max([note.get('time_ticks', 0) for note in redstone_notes])
+            else:
+                max_ticks = 0
+                
+            width = min(max(max_ticks // 5 + 5, 10), 128)
+            height = min(config.get('height', 6), 64)
+            length = min(max(len(redstone_notes) // 5 + 5, 8), 128) if redstone_notes else 10
+            
+            print(f"[Litematic] 尺寸: {width}x{height}x{length}")
+            
             # 创建Litematic结构
-            litematic_data = self._create_litematic_data(redstone_notes, config)
+            litematic_data = self._create_litematic_data(redstone_notes, width, height, length, config)
             
             # 保存为gzip压缩的NBT文件
             import gzip
             with gzip.open(output_path, 'wb') as f:
                 f.write(litematic_data)
             
-            print(f"[Litematic] 完成: {output_path} ({os.path.getsize(output_path)} 字节)")
-            return True
+            file_size = os.path.getsize(output_path)
+            print(f"[Litematic] 完成: {output_path} ({file_size} 字节)")
+            
+            return {
+                'success': True,
+                'dimensions': {'width': width, 'height': height, 'length': length}
+            }
             
         except Exception as e:
             import traceback
             traceback.print_exc()
             print(f"[Litematic错误] 生成失败: {str(e)}")
             # 回退到Schematic
-            return self.generate_schematic(redstone_notes, output_path, config)
+            return self._generate_schematic(redstone_notes, output_path.replace('.litematic', '.schematic'), config)
     
-    def generate_structure_nbt(self, redstone_notes, output_path, config=None):
+    def _generate_structure_nbt(self, redstone_notes, output_path, config=None):
         """
         生成结构方块NBT文件 (Minecraft结构方块格式)
         """
@@ -208,22 +252,39 @@ class LitematicGenerator:
             if config is None:
                 config = {}
             
+            # 计算尺寸
+            if redstone_notes:
+                max_ticks = max([note.get('time_ticks', 0) for note in redstone_notes])
+            else:
+                max_ticks = 0
+                
+            width = min(max(max_ticks // 5 + 5, 10), 32)  # 结构方块限制32格
+            height = min(config.get('height', 6), 32)
+            length = min(max(len(redstone_notes) // 5 + 5, 8), 32) if redstone_notes else 10
+            
+            print(f"[Structure NBT] 尺寸: {width}x{height}x{length}")
+            
             # 创建NBT结构
-            nbt_structure = self._create_structure_nbt(redstone_notes, config)
+            nbt_structure = self._create_structure_nbt(redstone_notes, width, height, length, config)
             
             # 保存NBT文件
             nbt_structure.save(output_path, gzipped=True)
             
-            print(f"[Structure NBT] 完成: {output_path} ({os.path.getsize(output_path)} 字节)")
-            return True
+            file_size = os.path.getsize(output_path)
+            print(f"[Structure NBT] 完成: {output_path} ({file_size} 字节)")
+            
+            return {
+                'success': True,
+                'dimensions': {'width': width, 'height': height, 'length': length}
+            }
             
         except Exception as e:
             import traceback
             traceback.print_exc()
             print(f"[Structure NBT错误] 生成失败: {str(e)}")
-            return False
+            return {'success': False, 'error': str(e)}
     
-    def generate_blueprint(self, redstone_notes, output_path, config=None):
+    def _generate_blueprint(self, redstone_notes, output_path, config=None):
         """
         生成蓝图文件 (JSON格式，兼容多种工具)
         """
@@ -233,29 +294,40 @@ class LitematicGenerator:
             if config is None:
                 config = {}
             
+            # 计算尺寸
+            if redstone_notes:
+                max_ticks = max([note.get('time_ticks', 0) for note in redstone_notes])
+            else:
+                max_ticks = 0
+                
+            width = min(max(max_ticks // 5 + 5, 10), 256)
+            height = min(config.get('height', 6), 256)
+            length = min(max(len(redstone_notes) // 5 + 5, 8), 256) if redstone_notes else 10
+            
+            print(f"[Blueprint] 尺寸: {width}x{height}x{length}")
+            
             # 创建蓝图数据
-            blueprint_data = self._create_blueprint_data(redstone_notes, config)
+            blueprint_data = self._create_blueprint_data(redstone_notes, width, height, length, config)
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(blueprint_data, f, indent=2, ensure_ascii=False)
             
-            print(f"[Blueprint] 完成: {output_path} ({os.path.getsize(output_path)} 字节)")
-            return True
+            file_size = os.path.getsize(output_path)
+            print(f"[Blueprint] 完成: {output_path} ({file_size} 字节)")
+            
+            return {
+                'success': True,
+                'dimensions': {'width': width, 'height': height, 'length': length}
+            }
             
         except Exception as e:
             import traceback
             traceback.print_exc()
             print(f"[Blueprint错误] 生成失败: {str(e)}")
-            return False
+            return {'success': False, 'error': str(e)}
     
-    def _create_schematic_data(self, redstone_notes, config):
+    def _create_schematic_data(self, redstone_notes, width, height, length, config):
         """创建Schematic数据"""
-        # 计算尺寸
-        max_ticks = max([note['time_ticks'] for note in redstone_notes]) if redstone_notes else 0
-        width = min(max(max_ticks // 5 + 5, 10), 128)
-        height = min(config.get('height', 6), 64)
-        length = min(max(len(redstone_notes) // 5 + 5, 8), 128)
-        
         block_count = width * height * length
         blocks = bytearray(block_count)
         data = bytearray(block_count)
@@ -291,15 +363,12 @@ class LitematicGenerator:
             schematic.write(struct.pack('>h', 0))
         
         # TileEntity列表
-        if config.get('include_tile_entities', True):
-            tile_entities = self._create_tile_entities(redstone_notes, width, height, length)
-            schematic.write(struct.pack('>h', len(tile_entities)))
-            for entity in tile_entities:
-                entity_data = json.dumps(entity).encode('utf-8')
-                schematic.write(struct.pack('>h', len(entity_data)))
-                schematic.write(entity_data)
-        else:
-            schematic.write(struct.pack('>h', 0))
+        tile_entities = self._create_tile_entities(redstone_notes, width, height, length)
+        schematic.write(struct.pack('>h', len(tile_entities)))
+        for entity in tile_entities:
+            entity_data = json.dumps(entity).encode('utf-8')
+            schematic.write(struct.pack('>h', len(entity_data)))
+            schematic.write(entity_data)
         
         # 扩展数据（版本2）
         if version >= 2:
@@ -310,7 +379,7 @@ class LitematicGenerator:
         
         return schematic.getvalue()
     
-    def _create_litematic_data(self, redstone_notes, config):
+    def _create_litematic_data(self, redstone_notes, width, height, length, config):
         """创建Litematic数据"""
         # 创建简化的Litematic结构
         litematic_structure = {
@@ -319,22 +388,16 @@ class LitematicGenerator:
                 "FormatVersion": 6
             },
             "Regions": {
-                "generated": self._create_litematic_region(redstone_notes, config)
+                "generated": self._create_litematic_region(redstone_notes, width, height, length, config)
             },
-            "Metadata": self._create_litematic_metadata(redstone_notes, config)
+            "Metadata": self._create_litematic_metadata(redstone_notes, width, height, length, config)
         }
         
-        # 转换为NBT格式（简化）
+        # 转换为JSON字符串
         return json.dumps(litematic_structure).encode('utf-8')
     
-    def _create_structure_nbt(self, redstone_notes, config):
+    def _create_structure_nbt(self, redstone_notes, width, height, length, config):
         """创建结构方块NBT数据"""
-        # 计算尺寸
-        max_ticks = max([note['time_ticks'] for note in redstone_notes]) if redstone_notes else 0
-        width = min(max(max_ticks // 5 + 5, 10), 32)  # 结构方块限制32格
-        height = min(config.get('height', 6), 32)
-        length = min(max(len(redstone_notes) // 5 + 5, 8), 32)
-        
         # 创建NBT结构
         structure = Compound({
             "DataVersion": Int(2975),  # 1.18.2
@@ -347,27 +410,21 @@ class LitematicGenerator:
         
         return structure
     
-    def _create_blueprint_data(self, redstone_notes, config):
+    def _create_blueprint_data(self, redstone_notes, width, height, length, config):
         """创建蓝图数据"""
-        # 计算尺寸
-        max_ticks = max([note['time_ticks'] for note in redstone_notes]) if redstone_notes else 0
-        width = min(max(max_ticks // 5 + 5, 10), 256)
-        height = min(config.get('height', 6), 256)
-        length = min(max(len(redstone_notes) // 5 + 5, 8), 256)
-        
         blueprint = {
             "version": "1.0.0",
             "name": config.get('name', 'Redstone Music'),
             "author": config.get('author', 'RedstoneMusicGenerator'),
             "description": config.get('description', 'Generated redstone music from audio'),
             "size": [width, height, length],
-            "created": int(os.path.getmtime(__file__)),
+            "created": int(os.path.getmtime(__file__)) if os.path.exists(__file__) else 0,
             "blocks": self._create_blueprint_blocks(redstone_notes, width, height, length, config),
             "metadata": {
                 "format": "redstone-music",
-                "note_count": len(redstone_notes),
-                "duration": max_ticks / 10.0,
-                "generator_version": "2.3.0"
+                "note_count": len(redstone_notes) if redstone_notes else 0,
+                "duration": (max([note.get('time_ticks', 0) for note in redstone_notes]) / 10.0) if redstone_notes else 0,
+                "generator_version": "2.5.0"
             }
         }
         
@@ -395,11 +452,14 @@ class LitematicGenerator:
     
     def _place_redstone_circuit(self, blocks, data, redstone_notes, width, height, length, config):
         """放置红石电路"""
+        if not redstone_notes:
+            return
+        
         placed_notes = 0
         
         for note in redstone_notes:
-            time_ticks = note['time_ticks']
-            pitch = note['pitch'] % 25
+            time_ticks = note.get('time_ticks', 0)
+            pitch = note.get('pitch', 0) % 25
             
             # 计算位置
             x = min(int(time_ticks / 5), width - 2)
@@ -441,8 +501,12 @@ class LitematicGenerator:
         """创建TileEntity数据（用于音符盒等）"""
         entities = []
         
+        if not redstone_notes:
+            return entities
+        
         for i, note in enumerate(redstone_notes[:50]):  # 限制数量
-            x = min(int(note['time_ticks'] / 5), width - 2)
+            time_ticks = note.get('time_ticks', 0)
+            x = min(int(time_ticks / 5), width - 2)
             y = 2
             z = i % (length - 2) + 1
             
@@ -452,34 +516,34 @@ class LitematicGenerator:
                 "x": x,
                 "y": y,
                 "z": z,
-                "note": note['pitch'],
+                "note": note.get('pitch', 0),
                 "instrument": note.get('instrument', 'harp')
             }
             entities.append(note_entity)
         
         return entities
     
-    def _create_litematic_region(self, redstone_notes, config):
+    def _create_litematic_region(self, redstone_notes, width, height, length, config):
         """创建Litematic区域数据"""
         # 简化实现
         return {
             "Position": {"x": 0, "y": 0, "z": 0},
-            "Size": {"x": 10, "y": 5, "z": 10},
+            "Size": {"x": width, "y": height, "z": length},
             "BlockStatePalette": ["minecraft:air", "minecraft:stone", "minecraft:note_block"],
-            "BlockStates": [0] * 500
+            "BlockStates": [0] * (width * height * length)
         }
     
-    def _create_litematic_metadata(self, redstone_notes, config):
+    def _create_litematic_metadata(self, redstone_notes, width, height, length, config):
         """创建Litematic元数据"""
         return {
             "Name": config.get('name', 'Redstone Music'),
             "Author": config.get('author', 'RedstoneMusicGenerator'),
             "Description": config.get('description', 'Generated from audio'),
             "RegionCount": 1,
-            "TimeCreated": int(os.path.getmtime(__file__)),
-            "TimeModified": int(os.path.getmtime(__file__)),
-            "TotalBlocks": 100,
-            "TotalVolume": 500
+            "TimeCreated": int(os.path.getmtime(__file__)) if os.path.exists(__file__) else 0,
+            "TimeModified": int(os.path.getmtime(__file__)) if os.path.exists(__file__) else 0,
+            "TotalBlocks": width * height * length,
+            "TotalVolume": width * height * length
         }
     
     def _create_structure_palette(self):
@@ -508,8 +572,12 @@ class LitematicGenerator:
         """创建结构方块列表"""
         blocks = []
         
+        if not redstone_notes:
+            return List[Compound](blocks)
+        
         for i, note in enumerate(redstone_notes[:30]):  # 结构方块限制
-            x = min(int(note['time_ticks'] / 5), width - 2)
+            time_ticks = note.get('time_ticks', 0)
+            x = min(int(time_ticks / 5), width - 2)
             y = 2
             z = i % (length - 2) + 1
             
@@ -517,7 +585,7 @@ class LitematicGenerator:
                 "pos": List[Int]([Int(x), Int(y), Int(z)]),
                 "state": Int(2),  # 音符盒在调色板中的索引
                 "nbt": Compound({
-                    "note": Byte(note['pitch']),
+                    "note": Byte(note.get('pitch', 0)),
                     "instrument": String(note.get('instrument', 'harp'))
                 })
             })
@@ -529,8 +597,12 @@ class LitematicGenerator:
         """创建蓝图方块列表"""
         blocks = []
         
+        if not redstone_notes:
+            return blocks
+        
         for i, note in enumerate(redstone_notes[:100]):  # 限制数量
-            x = min(int(note['time_ticks'] / 5), width - 2)
+            time_ticks = note.get('time_ticks', 0)
+            x = min(int(time_ticks / 5), width - 2)
             y = 2
             z = i % (length - 2) + 1
             
@@ -540,7 +612,7 @@ class LitematicGenerator:
                 "z": z,
                 "type": "note_block",
                 "data": {
-                    "note": note['pitch'],
+                    "note": note.get('pitch', 0),
                     "instrument": note.get('instrument', 'harp'),
                     "powered": False
                 }
@@ -595,21 +667,12 @@ class LitematicGenerator:
             'format': 'unknown'
         }
     
-    # 保持原有方法兼容性
+    # 保持原有方法兼容性 - 这些方法现在调用内部方法
     def generate_litematic(self, redstone_notes, output_path, name="RedstoneMusic"):
         """保持原有接口兼容"""
-        return self.generate_projection(
-            redstone_notes,
-            output_path,
-            format_type='litematic',
-            config={'name': name}
-        )
+        config = {'name': name}
+        return self._generate_litematic(redstone_notes, output_path, config)
     
     def generate_schematic(self, redstone_notes, output_path):
         """保持原有接口兼容"""
-        return self.generate_projection(
-            redstone_notes,
-            output_path,
-            format_type='schematic',
-            config={}
-        )
+        return self._generate_schematic(redstone_notes, output_path, {})
